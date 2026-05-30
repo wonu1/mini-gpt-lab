@@ -43,7 +43,22 @@ class BPETokenizer:
         1. 특수 토큰 4개를 고정 ID 0~3에 등록합니다.
         2. byte 0~255를 ID 4~259에 bytes([byte_value]) 형태로 등록합니다.
         """
-        raise NotImplementedError("_init_special_tokens를 구현하세요.")
+
+        # 먼저 <pad>, <unk>, <bos>, <eos>를 정해진 번호에 넣습니다.
+        for token, token_id in SPECIAL_IDS.items():
+            self.id_to_token[token_id] = token
+            self.token_to_id[token] = token_id
+
+        # byte 0~255를 4번부터 259번까지 차례대로 등록합니다.
+        # 예: byte 65는 b"A"이고, ID는 65 + 4 = 69입니다.
+        for byte_value in range(NUM_BYTES):
+            token_id = BYTE_OFFSET + byte_value
+            token = bytes([byte_value])
+
+            self.id_to_token[token_id] = token
+            self.token_to_id[token] = token_id
+
+        # raise NotImplementedError("_init_special_tokens를 구현하세요.")
 
     def get_pad_id(self):
         """padding 토큰 ID."""
