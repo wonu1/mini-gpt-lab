@@ -7,6 +7,7 @@ UTF-8 byte-level BPE 토크나이저 과제 템플릿.
 항상 `text.encode("utf-8")`로 byte ID 시퀀스를 만든 뒤 merge를 적용하세요.
 """
 
+import json
 from pathlib import Path
 
 
@@ -94,13 +95,134 @@ class BPETokenizer:
 
         bytes와 tuple은 JSON에 바로 저장할 수 없으므로 type 정보를 함께 저장하세요.
         """
-        raise NotImplementedError("BPETokenizer.save를 구현하세요.")
+        """
+        tokenizer의 vocabulary와 merge rule을 JSON 파일로 저장합니다.
+
+        저장하는 것:
+            - vocab_size
+            - id_to_token
+            - merges
+
+        주의:
+            JSON은 bytes와 tuple을 그대로 저장할 수 없기 때문에,
+            token마다 type 정보를 함께 저장합니다.
+        """
+
+        if not self.id_to_token:
+            self._init_special_tokens()
+
+        def serialize_token(token):
+            """
+            Python token을 JSON에 저장 가능한 형태로 바꿉니다.
+
+            str   -> {"type": "str", "value": "..."}
+            bytes -> {"type": "bytes", "value": [byte 값들]}
+            tuple -> {"type": "tuple", "value": [left_id, right_id]}
+            """
+
+            if isinstance(token, str):
+                return {
+                    "type": "str",
+                    "value": token,
+                }
+
+            if isinstance(token, bytes):
+                return {
+                    "type": "bytes",
+                    "value": list(token),
+                }
+
+            if isinstance(token, tuple):
+                return {
+                    "type": "tuple",
+                    "value": list(token),
+                }
+
+            raise TypeError(f"저장할 수 없는 token 타입입니다: {type(token)}")
+
+        data = {
+            "vocab_size": self.vocab_size,
+            "id_to_token": {},
+            "merges": [],
+        }
+
+        for token_id, token in self.id_to_token.items():
+            data["id_to_token"][str(token_id)] = serialize_token(token)
+
+        for pair in self.merges:
+            data["merges"].append(list(pair))
+
+        path = Path(path)
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        # raise NotImplementedError("BPETokenizer.save를 구현하세요.")
 
     def load(self, path: str | Path):
         """
         TODO: save()로 저장한 JSON 파일을 읽어 vocabulary와 merge rule을 복원합니다.
         """
-        raise NotImplementedError("BPETokenizer.load를 구현하세요.")
+        """
+        save()로 저장한 JSON 파일을 읽어 tokenizer 상태를 복원합니다.
+
+        복원하는 것:
+            - vocab_size
+            - id_to_token
+            - token_to_id
+            - merges
+
+        token_to_id는 따로 저장하지 않고,
+        복원된 id_to_token을 뒤집어서 다시 만듭니다.
+        """
+
+        def deserialize_token(token_data):
+            """
+            JSON에 저장된 token 정보를 다시 Python token으로 바꿉니다.
+
+            {"type": "str", "value": "..."}
+                -> str
+
+            {"type": "bytes", "value": [65]}
+                -> b"A"
+
+            {"type": "tuple", "value": [69, 70]}
+                -> (69, 70)
+            """
+
+            token_type = token_data["type"]
+            value = token_data["value"]
+
+            if token_type == "str":
+                return value
+
+            if token_type == "bytes":
+                return bytes(value)
+
+            if token_type == "tuple":
+                return tuple(value)
+
+            raise ValueError(f"알 수 없는 token 타입입니다: {token_type}")
+
+        path = Path(path)
+        data = json.loads(path.read_text(encoding="utf-8"))
+
+        self.vocab_size = data["vocab_size"]
+        self.id_to_token = {}
+        self.token_to_id = {}
+        self.merges = []
+
+        for token_id_text, token_data in data["id_to_token"].items():
+            token_id = int(token_id_text)
+            token = deserialize_token(token_data)
+
+            self.id_to_token[token_id] = token
+            self.token_to_id[token] = token_id
+
+        for pair in data["merges"]:
+            self.merges.append(tuple(pair))
+
+        # raise NotImplementedError("BPETokenizer.load를 구현하세요.")
 
     def encode(self, text: str, add_bos_eos: bool = False) -> list[int]:
         """
