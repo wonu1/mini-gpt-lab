@@ -111,6 +111,51 @@ class BPETokenizer:
         - train/load에서 얻은 merge rule을 학습 순서대로 적용합니다.
         - add_bos_eos=True이면 앞뒤에 bos/eos ID를 붙입니다.
         """
+
+        if not self.id_to_token:
+            self._init_special_tokens()
+
+        # 1. 문자열을 UTF-8 byte로 바꿉니다.
+        text_bytes = text.encode("utf-8")
+
+        # 2. byte 값을 기본 token ID로 바꿉니다.
+        token_ids = []
+
+        for byte_value in text_bytes:
+            token_id = BYTE_OFFSET + byte_value
+            token_ids.append(token_id)
+
+        # 3. 학습된 merge rule을 순서대로 적용합니다.
+        #
+        # 예를 들어 pair가 (69, 70)이고, 이 pair의 새 token id가 260이라면
+        # [69, 70, 71]은 [260, 71]이 됩니다.
+        for pair in self.merges:
+            merged_token_id = self.token_to_id[pair]
+
+            new_token_ids = []
+            index = 0
+
+            while index < len(token_ids):
+                has_next_token = index < len(token_ids) - 1
+
+                if has_next_token:
+                    current_pair = (token_ids[index], token_ids[index + 1])
+
+                    if current_pair == pair:
+                        new_token_ids.append(merged_token_id)
+                        index += 2
+                        continue
+
+                new_token_ids.append(token_ids[index])
+                index += 1
+
+            token_ids = new_token_ids
+
+        # 4. 문장 시작/끝 토큰이 필요하면 붙입니다.
+        if add_bos_eos:
+            token_ids = [self.get_bos_id()] + token_ids + [self.get_eos_id()]
+
+        return token_ids
         raise NotImplementedError("BPETokenizer.encode를 구현하세요.")
 
     def decode(self, ids: list[int], skip_special: bool = True) -> str:
@@ -121,4 +166,91 @@ class BPETokenizer:
         - merge token은 원본 byte token까지 재귀적으로 펼칩니다.
         - byte를 하나씩 decode하지 말고, 마지막에 `bytes(...).decode("utf-8")`를 한 번만 호출합니다.
         """
+
+        """
+        token ID 리스트를 문자열로 복원합니다.
+
+        Input:
+            ids:
+                token ID 리스트입니다.
+                예: [69]
+                예: [238, 180, 132]
+                예: [2, 69, 3]
+
+            skip_special:
+                True이면 <pad>, <unk>, <bos>, <eos> 같은 특수 토큰은 복원 결과에서 제외합니다.
+
+        Output:
+            복원된 문자열입니다.
+
+            예:
+                decode([69])
+                -> "A"
+
+            예:
+                decode([238, 180, 132])
+                -> "가"
+
+            예:
+                decode([2, 69, 3], skip_special=True)
+                -> "A"
+
+        중요한 점:
+            - 기본 byte token은 bytes 객체입니다.
+            - BPE merge token은 (left_id, right_id) 형태의 tuple입니다.
+            - merge token은 바로 문자로 바꾸지 않고, 내부 token들을 재귀적으로 펼쳐 byte로 만듭니다.
+            - 한글은 UTF-8에서 여러 byte로 이루어질 수 있으므로 byte 하나씩 decode하면 안 됩니다.
+            - 모든 byte를 합친 뒤 마지막에 decode("utf-8")를 한 번만 호출합니다.
+        """
+
+        if not self.id_to_token:
+            self._init_special_tokens()
+
+        def token_to_bytes(token_id: int) -> bytes:
+            """
+            token ID 하나를 bytes로 복원합니다.
+
+            token 종류:
+                - str:
+                    <pad>, <unk>, <bos>, <eos> 같은 특수 토큰
+                - bytes:
+                    기본 byte token
+                - tuple:
+                    BPE merge token, 예: (69, 70)
+            """
+
+            token = self.id_to_token[token_id]
+
+            # 특수 토큰입니다. 보통 decode 결과에서는 제외합니다.
+            if isinstance(token, str):
+                if skip_special:
+                    return b""
+                return token.encode("utf-8")
+
+            # 기본 byte token입니다.
+            # 예: id 69 -> b"A"
+            if isinstance(token, bytes):
+                return token
+
+            # BPE merge token입니다.
+            # 예: id 260 -> (69, 70)
+            # 이 경우 왼쪽 token과 오른쪽 token을 각각 bytes로 펼친 뒤 이어 붙입니다.
+            if isinstance(token, tuple):
+                left_id, right_id = token
+                left_bytes = token_to_bytes(left_id)
+                right_bytes = token_to_bytes(right_id)
+                return left_bytes + right_bytes
+
+            raise TypeError(f"지원하지 않는 token 타입입니다: {type(token)}")
+
+        byte_chunks = []
+
+        for token_id in ids:
+            token_bytes = token_to_bytes(token_id)
+            byte_chunks.append(token_bytes)
+
+        text_bytes = b"".join(byte_chunks)
+
+        return text_bytes.decode("utf-8")
+
         raise NotImplementedError("BPETokenizer.decode를 구현하세요.")
