@@ -24,10 +24,17 @@ class GPTDataset(Dataset):
         self.context_length = context_length
         self.stride = stride if stride is not None else context_length
         # TODO: 만들 수 있는 학습 샘플 개수를 self._length에 저장하세요.
-        raise NotImplementedError("GPTDataset.__init__에서 self._length를 구현하세요.")
+
+        if len(token_ids) < context_length + 1:
+            self._length = 0
+        else:
+            self._length = (len(token_ids) - context_length - 1) // self.stride + 1
+
+        # raise NotImplementedError("GPTDataset.__init__에서 self._length를 구현하세요.")
 
     def __len__(self) -> int:
         """TODO: 전체 샘플 개수를 반환합니다."""
+        return self._length
         raise NotImplementedError("GPTDataset.__len__을 구현하세요.")
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -38,6 +45,35 @@ class GPTDataset(Dataset):
             input_ids: (context_length,)
             target_ids: (context_length,)
         """
+        """
+        idx번째 input_ids와 target_ids를 LongTensor로 반환합니다.
+
+        input_ids:
+            현재 위치부터 context_length개 token
+
+        target_ids:
+            input_ids보다 한 칸 뒤에서 시작하는 context_length개 token
+
+        예:
+            token_ids = [10, 11, 12, 13]
+            context_length = 3
+            idx = 0
+
+            input_ids  = [10, 11, 12]
+            target_ids = [11, 12, 13]
+        """
+
+        start = idx * self.stride
+        end = start + self.context_length
+
+        input_ids = self.token_ids[start:end]
+        target_ids = self.token_ids[start + 1:end + 1]
+
+        input_tensor = torch.tensor(input_ids, dtype=torch.long)
+        target_tensor = torch.tensor(target_ids, dtype=torch.long)
+
+        return input_tensor, target_tensor
+    
         raise NotImplementedError("GPTDataset.__getitem__을 구현하세요.")
 
 
@@ -51,4 +87,21 @@ def create_dataloader(
     num_workers: int = 0,
 ) -> DataLoader:
     """TODO: GPTDataset을 만들고 torch.utils.data.DataLoader로 감싸 반환합니다."""
+
+    dataset = GPTDataset(
+        token_ids=token_ids,
+        context_length=context_length,
+        stride=stride,
+    )
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        drop_last=drop_last,
+        num_workers=num_workers,
+    )
+
+    return dataloader
+
     raise NotImplementedError("create_dataloader를 구현하세요.")
