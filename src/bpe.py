@@ -79,15 +79,215 @@ class BPETokenizer:
 
     def train(self, corpus: str):
         """
-        TODO: 코퍼스에서 BPE merge rule과 vocabulary를 학습합니다.
+        코퍼스에서 BPE merge rule과 vocabulary를 학습합니다.
 
-        구현 힌트:
-        - `corpus.encode("utf-8")`로 byte ID 시퀀스를 만듭니다.
-        - 가장 자주 등장하는 이웃 token pair를 찾습니다.
-        - 새 token ID를 만들고, 시퀀스의 해당 pair를 새 ID로 치환합니다.
-        - `self.merges`, `self.id_to_token`, `self.token_to_id`를 갱신합니다.
+        BPE 학습의 입력:
+            corpus: str
+                학습에 사용할 원본 문자열입니다.
+                예: "이 영화는 정말 좋았다. 이 영화는 다시 보고 싶다."
+
+        BPE 학습의 출력:
+            return 값은 없습니다.
+
+            대신 아래 tokenizer 내부 상태가 채워집니다.
+                - self.id_to_token
+                - self.token_to_id
+                - self.merges
+
+        큰 흐름:
+            1. 학습 상태 초기화
+            2. corpus를 기본 byte token ID 시퀀스로 변환
+            3. pair count / pair replace 도구 함수 정의
+            4. 가장 자주 나온 pair를 반복해서 merge
         """
-        raise NotImplementedError("BPETokenizer.train을 구현하세요.")
+
+        # =========================================================================
+        # 1. 학습 상태 초기화
+        # =========================================================================
+        #
+        # train()을 새로 호출하면 이전에 학습했던 vocab/merge rule을 버리고
+        # 처음부터 다시 학습합니다.
+        #
+        # 초기화 후 _init_special_tokens()를 호출하면:
+        #   - 0~3번: <pad>, <unk>, <bos>, <eos>
+        #   - 4~259번: byte 0~255
+        #
+        # 총 260개의 기본 token이 준비됩니다.
+        self.id_to_token = {}
+        self.token_to_id = {}
+        self.merges = []
+
+        self._init_special_tokens()
+
+        # =========================================================================
+        # 2. corpus를 기본 byte token ID 시퀀스로 변환
+        # =========================================================================
+        #
+        # BPE는 글자 단위로 바로 시작하지 않고, UTF-8 byte 단위에서 시작합니다.
+        #
+        # 예:
+        #   "A".encode("utf-8")
+        #   -> [65]
+        #
+        #   BYTE_OFFSET = 4 이므로:
+        #   "A" -> [65 + 4] -> [69]
+        #
+        # 예:
+        #   "가".encode("utf-8")
+        #   -> [234, 176, 128]
+        #
+        #   BYTE_OFFSET = 4 이므로:
+        #   "가" -> [238, 180, 132]
+        #
+        # 이 token_ids가 BPE merge의 출발점입니다.
+        token_ids = []
+
+        for byte_value in corpus.encode("utf-8"):
+            token_id = BYTE_OFFSET + byte_value
+            token_ids.append(token_id)
+
+        # =========================================================================
+        # 3-1. 현재 시퀀스에서 이웃 token pair 빈도 세기
+        # =========================================================================
+        #
+        # BPE는 "가장 자주 붙어 나오는 두 token"을 찾아서 하나로 합칩니다.
+        #
+        # 예:
+        #   ids = [69, 70, 69, 70]
+        #
+        # 이웃 pair는:
+        #   index 0: (69, 70)
+        #   index 1: (70, 69)
+        #   index 2: (69, 70)
+        #
+        # 결과:
+        #   {
+        #       (69, 70): 2,
+        #       (70, 69): 1,
+        #   }
+        def count_adjacent_pairs(ids: list[int]) -> dict[tuple[int, int], int]:
+            pair_counts = {}
+
+            for index in range(len(ids) - 1):
+                pair = (ids[index], ids[index + 1])
+
+                if pair not in pair_counts:
+                    pair_counts[pair] = 0
+
+                pair_counts[pair] += 1
+
+            return pair_counts
+
+        # =========================================================================
+        # 3-2. 선택된 pair를 새 token ID로 치환하기
+        # =========================================================================
+        #
+        # 가장 자주 나온 pair를 새 token 하나로 바꿉니다.
+        #
+        # 예:
+        #   ids = [69, 70, 69, 70]
+        #   target_pair = (69, 70)
+        #   new_token_id = 260
+        #
+        # 결과:
+        #   [260, 260]
+        #
+        # index += 2를 하는 이유:
+        #   target_pair는 token 두 개짜리 묶음입니다.
+        #   두 token을 새 token 하나로 바꿨으므로 두 칸을 건너뜁니다.
+        def replace_pair(
+            ids: list[int],
+            target_pair: tuple[int, int],
+            new_token_id: int,
+        ) -> list[int]:
+            new_ids = []
+            index = 0
+
+            while index < len(ids):
+                has_next_token = index < len(ids) - 1
+
+                if has_next_token:
+                    current_pair = (ids[index], ids[index + 1])
+
+                    if current_pair == target_pair:
+                        new_ids.append(new_token_id)
+                        index += 2
+                        continue
+
+                new_ids.append(ids[index])
+                index += 1
+
+            return new_ids
+
+        # =========================================================================
+        # 4. 가장 자주 나온 pair를 반복해서 merge
+        # =========================================================================
+        #
+        # 현재 기본 vocab 크기:
+        #   특수 토큰 4개 + byte 토큰 256개 = 260개
+        #
+        # 따라서 새 BPE token ID는 len(self.id_to_token), 즉 처음에는 260번입니다.
+        #
+        # 반복마다 하는 일:
+        #   1. 현재 token_ids에서 pair 빈도를 셉니다.
+        #   2. 가장 자주 나온 pair를 고릅니다.
+        #   3. 새 token ID를 만듭니다.
+        #   4. vocab에 등록합니다.
+        #   5. merges에 기록합니다.
+        #   6. token_ids 안의 해당 pair를 새 token ID로 치환합니다.
+        #
+        # 이 과정을 vocab_size에 도달할 때까지 반복합니다.
+        while len(self.id_to_token) < self.vocab_size:
+            # token이 0개 또는 1개뿐이면 이웃 pair를 만들 수 없습니다.
+            if len(token_ids) < 2:
+                break
+
+            pair_counts = count_adjacent_pairs(token_ids)
+
+            # pair가 없으면 더 이상 merge할 수 없습니다.
+            if not pair_counts:
+                break
+
+            # 가장 많이 등장한 pair를 고릅니다.
+            best_pair = max(pair_counts, key=pair_counts.get)
+            best_count = pair_counts[best_pair]
+
+            # 한 번만 등장한 pair까지 합치면 "자주 나오는 패턴 학습"이라기보다
+            # corpus를 외우는 쪽에 가까워지므로 여기서는 멈춥니다.
+            if best_count < 2:
+                break
+
+            # 새 token ID를 만듭니다.
+            #
+            # 처음에는 기본 vocab이 260개이므로 new_token_id는 260입니다.
+            # 그다음은 261, 262, ... 순서로 증가합니다.
+            new_token_id = len(self.id_to_token)
+
+            # 새 token을 vocab에 등록합니다.
+            #
+            # 예:
+            #   best_pair = (69, 70)
+            #   new_token_id = 260
+            #
+            #   self.id_to_token[260] = (69, 70)
+            #   self.token_to_id[(69, 70)] = 260
+            self.id_to_token[new_token_id] = best_pair
+            self.token_to_id[best_pair] = new_token_id
+
+            # encode()에서 같은 순서로 merge를 적용할 수 있도록 기록합니다.
+            self.merges.append(best_pair)
+
+            # 실제 학습용 token sequence에서도 해당 pair를 새 token으로 바꿉니다.
+            #
+            # 예:
+            #   [69, 70, 69, 70]
+            #   -> [260, 260]
+            token_ids = replace_pair(
+                ids=token_ids,
+                target_pair=best_pair,
+                new_token_id=new_token_id,
+            )
+        # raise NotImplementedError("BPETokenizer.train을 구현하세요.")
 
     def save(self, path: str | Path):
         """
