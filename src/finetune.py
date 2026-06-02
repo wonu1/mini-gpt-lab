@@ -6,6 +6,8 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
+import csv
+import random
 
 try:
     from .model import GPTModel
@@ -26,6 +28,57 @@ def make_sentiment_dataset(
     반환 형식:
         [{"text": "리뷰", "label": 0 또는 1}, ...]
     """
+
+    def read_nsmc_tsv(path: str | Path) -> list[dict]:
+        rows = []
+
+        with open(path, "r", encoding="utf-8", newline="") as file:
+            reader = csv.DictReader(file, delimiter="\t")
+
+            for row in reader:
+                text = row.get("document")
+                label = row.get("label")
+
+                if text is None:
+                    continue
+
+                text = text.strip()
+
+                if not text:
+                    continue
+
+                if label not in {"0", "1"}:
+                    continue
+
+                rows.append(
+                    {
+                        "text": text,
+                        "label": int(label),
+                    }
+                )
+
+        return rows
+
+    train_rows = read_nsmc_tsv(train_tsv_path)
+
+    random_generator = random.Random(seed)
+    random_generator.shuffle(train_rows)
+
+    val_size = int(len(train_rows) * val_ratio)
+
+    if len(train_rows) > 0 and val_ratio > 0:
+        val_size = max(1, val_size)
+
+    val_data = train_rows[:val_size]
+    train_data = train_rows[val_size:]
+
+    if test_tsv_path is None:
+        test_data = []
+    else:
+        test_data = read_nsmc_tsv(test_tsv_path)
+
+    return train_data, val_data, test_data
+
     raise NotImplementedError("make_sentiment_dataset을 구현하세요.")
 
 
