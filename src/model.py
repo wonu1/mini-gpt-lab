@@ -22,7 +22,19 @@ class LayerNorm(nn.Module):
         self.eps = eps
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """TODO: 마지막 차원의 평균과 분산으로 정규화한 뒤 gamma/beta를 적용합니다."""
+        """
+        마지막 차원 기준으로 각 token 벡터를 정규화합니다.
+
+        입력/출력 shape:
+            (B, T, C) -> (B, T, C)
+        """
+
+        mean = x.mean(dim=-1, keepdim=True)
+        variance = x.var(dim=-1, keepdim=True, unbiased=False)
+
+        normalized = (x - mean) / torch.sqrt(variance + self.eps)
+
+        return self.gamma * normalized + self.beta
         raise NotImplementedError("LayerNorm.forward를 구현하세요.")
 
 
