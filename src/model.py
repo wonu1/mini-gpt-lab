@@ -197,4 +197,34 @@ def generate_text_simple(
     context_size: int,
 ) -> torch.Tensor:
     """TODO: greedy 방식으로 max_new_tokens만큼 다음 토큰을 이어 붙입니다."""
+    """
+    greedy 방식으로 max_new_tokens만큼 다음 token을 이어 붙입니다.
+
+    입력:
+        idx: (B, T)
+
+    출력:
+        (B, T + max_new_tokens)
+    """
+
+    model.eval()
+
+    for _ in range(max_new_tokens):
+        # context_length보다 길어지면 마지막 context_size개 token만 모델에 넣습니다.
+        idx_cond = idx[:, -context_size:]
+
+        with torch.no_grad():
+            logits = model(idx_cond)
+
+        # 마지막 위치의 logits만 사용해 다음 token을 고릅니다.
+        last_logits = logits[:, -1, :]
+
+        # greedy decoding: 가장 점수가 높은 token 선택
+        next_token = torch.argmax(last_logits, dim=-1, keepdim=True)
+
+        # 기존 sequence 뒤에 새 token을 붙입니다.
+        idx = torch.cat((idx, next_token), dim=1)
+
+    return idx
+
     raise NotImplementedError("generate_text_simple을 구현하세요.")
