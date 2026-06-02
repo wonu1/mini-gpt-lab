@@ -43,6 +43,7 @@ class GELU(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """TODO: tanh 근사식 또는 torch 연산으로 GELU를 구현합니다."""
+        return torch.nn.functional.gelu(x)
         raise NotImplementedError("GELU.forward를 구현하세요.")
 
 
@@ -52,10 +53,19 @@ class FeedForward(nn.Module):
     def __init__(self, d_model: int, dropout: float = 0.1, mult: int = 4):
         super().__init__()
         # TODO: d_model -> mult*d_model -> d_model 구조의 작은 MLP를 정의하세요.
-        raise NotImplementedError("FeedForward.__init__을 구현하세요.")
+        hidden_dim = mult * d_model
+
+        self.net = nn.Sequential(
+            nn.Linear(d_model, hidden_dim),
+            GELU(),
+            nn.Linear(hidden_dim, d_model),
+            nn.Dropout(dropout),
+        )
+        # raise NotImplementedError("FeedForward.__init__을 구현하세요.")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """TODO: FeedForward 네트워크를 통과시킵니다."""
+        return self.net(x)
         raise NotImplementedError("FeedForward.forward를 구현하세요.")
 
 
@@ -74,10 +84,43 @@ class TransformerBlock(nn.Module):
     ):
         super().__init__()
         # TODO: attention, ffn, layernorm, dropout을 정의하세요.
-        raise NotImplementedError("TransformerBlock.__init__을 구현하세요.")
+
+        self.ln1 = LayerNorm(d_model)
+        self.attention = MultiHeadAttention(
+            d_model=d_model,
+            n_heads=n_heads,
+            drop_rate=drop_rate,
+            qkv_bias=qkv_bias,
+        )
+
+        self.ln2 = LayerNorm(d_model)
+        self.ffn = FeedForward(d_model, dropout=drop_rate)
+
+        self.dropout = nn.Dropout(drop_rate)
+
+        # raise NotImplementedError("TransformerBlock.__init__을 구현하세요.")
 
     def forward(self, x: torch.Tensor, causal_mask: bool = True) -> torch.Tensor:
         """TODO: attention과 ffn을 residual connection으로 연결합니다."""
+
+        """
+        attention과 feed-forward를 residual connection으로 연결합니다.
+
+        입력/출력 shape:
+            (B, T, d_model) -> (B, T, d_model)
+        """
+
+        attention_out = self.attention(
+            self.ln1(x),
+            causal_mask=causal_mask,
+        )
+        x = x + self.dropout(attention_out)
+
+        ffn_out = self.ffn(self.ln2(x))
+        x = x + self.dropout(ffn_out)
+
+        return x
+    
         raise NotImplementedError("TransformerBlock.forward를 구현하세요.")
 
 
