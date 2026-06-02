@@ -140,7 +140,13 @@ class GPTForSequenceClassification(nn.Module):
         self.gpt = gpt_model
         self.num_labels = num_labels
         # TODO: dropout과 classifier를 정의하세요. classifier 입력 차원은 gpt_model.config["emb_dim"]입니다.
-        raise NotImplementedError("GPTForSequenceClassification.__init__을 구현하세요.")
+
+        emb_dim = gpt_model.config["emb_dim"]
+
+        self.dropout = nn.Dropout(drop_rate)
+        self.classifier = nn.Linear(emb_dim, num_labels)
+
+        # raise NotImplementedError("GPTForSequenceClassification.__init__을 구현하세요.")
 
     def forward(
         self,
@@ -152,6 +158,27 @@ class GPTForSequenceClassification(nn.Module):
 
         labels가 있으면 (loss, logits), 없으면 logits를 반환합니다.
         """
+
+        x = self.gpt.embedding(input_ids)
+
+        for block in self.gpt.blocks:
+            x = block(x, causal_mask=True)
+
+        x = self.gpt.final_norm(x)
+
+        # 가장 단순한 문장 대표 벡터:
+        # 마지막 위치의 hidden state를 사용합니다.
+        pooled = x[:, -1, :]
+
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)
+
+        if labels is None:
+            return logits
+
+        loss = torch.nn.functional.cross_entropy(logits, labels)
+
+        return loss, logits
         raise NotImplementedError("GPTForSequenceClassification.forward를 구현하세요.")
 
 
