@@ -131,7 +131,30 @@ class GPTModel(nn.Module):
         super().__init__()
         self.config = config
         # TODO: embedding, blocks, final layernorm, lm_head를 정의하세요.
-        raise NotImplementedError("GPTModel.__init__을 구현하세요.")
+
+        self.embedding = InputEmbedding(
+            vocab_size=config["vocab_size"],
+            emb_dim=config["emb_dim"],
+            context_length=config["context_length"],
+            drop_rate=config["drop_rate"],
+        )
+
+        self.blocks = nn.ModuleList(
+            [
+                TransformerBlock(
+                    d_model=config["emb_dim"],
+                    n_heads=config["n_heads"],
+                    drop_rate=config["drop_rate"],
+                    qkv_bias=config["qkv_bias"],
+                )
+                for _ in range(config["n_layers"])
+            ]
+        )
+
+        self.final_norm = LayerNorm(config["emb_dim"])
+        self.lm_head = nn.Linear(config["emb_dim"], config["vocab_size"])
+
+        # raise NotImplementedError("GPTModel.__init__을 구현하세요.")
 
     def forward(
         self,
@@ -145,7 +168,26 @@ class GPTModel(nn.Module):
             targets가 None이면 logits
             targets가 있으면 (loss, logits)
         """
-        raise NotImplementedError("GPTModel.forward를 구현하세요.")
+
+        x = self.embedding(idx)
+
+        for block in self.blocks:
+            x = block(x, causal_mask=True)
+
+        x = self.final_norm(x)
+        logits = self.lm_head(x)
+
+        if targets is None:
+            return logits
+
+        loss = torch.nn.functional.cross_entropy(
+            logits.view(-1, logits.size(-1)),
+            targets.view(-1),
+        )
+
+        return loss, logits
+    
+        # raise NotImplementedError("GPTModel.forward를 구현하세요.")
 
 
 def generate_text_simple(
