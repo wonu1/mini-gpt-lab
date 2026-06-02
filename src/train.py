@@ -3,6 +3,7 @@
 
 import matplotlib.pyplot as plt
 import torch
+from pathlib import Path
 
 try:
     from .model import GPTModel
@@ -173,7 +174,42 @@ def generate_and_print_sample(
     top_k: int | None = 40,
 ) -> None:
     """TODO: start_context를 encode하고 generate 후 decode하여 출력합니다."""
-    raise NotImplementedError("generate_and_print_sample을 구현하세요.")
+
+    was_training = model.training
+    model.eval()
+
+    token_ids = [tokenizer.get_bos_id()]
+    token_ids.extend(tokenizer.encode(start_context, add_bos_eos=False))
+
+    idx = torch.tensor(token_ids, dtype=torch.long).unsqueeze(0).to(device)
+
+    safe_top_k = top_k
+    if safe_top_k is not None:
+        safe_top_k = min(safe_top_k, model.config["vocab_size"])
+
+    generated = generate(
+        model=model,
+        idx=idx,
+        max_new_tokens=max_new_tokens,
+        context_size=context_size,
+        temperature=temperature,
+        top_k=safe_top_k,
+        eos_id=tokenizer.get_eos_id(),
+    )
+
+    generated_ids = generated[0].tolist()
+    generated_text = tokenizer.decode(
+        generated_ids,
+        skip_special=True,
+        errors="replace",
+    )
+
+    print(generated_text)
+
+    if was_training:
+        model.train()
+
+    # raise NotImplementedError("generate_and_print_sample을 구현하세요.")
 
 
 def train_model(
@@ -192,6 +228,79 @@ def train_model(
     global_step: int = 0,
 ) -> list[float]:
     """TODO: 사전 학습 루프를 구현하고 epoch별 train loss 리스트를 반환합니다."""
+
+    model.to(device)
+    model.train()
+
+    train_losses = []
+
+    for epoch in range(start_epoch, num_epochs):
+        for input_batch, target_batch in train_loader:
+            optimizer.zero_grad(set_to_none=True)
+
+            loss = calc_loss_batch(
+                input_batch=input_batch,
+                target_batch=target_batch,
+                model=model,
+                device=device,
+            )
+
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+
+            global_step += 1
+
+            if global_step % eval_freq == 0:
+                train_loss = calc_loss_loader(
+                    data_loader=train_loader,
+                    model=model,
+                    device=device,
+                    num_batches=eval_iter,
+                )
+                val_loss = calc_loss_loader(
+                    data_loader=val_loader,
+                    model=model,
+                    device=device,
+                    num_batches=eval_iter,
+                )
+
+                train_losses.append(train_loss)
+
+                print(
+                    f"epoch {epoch + 1:03d} | "
+                    f"step {global_step:06d} | "
+                    f"train loss {train_loss:.4f} | "
+                    f"val loss {val_loss:.4f}"
+                )
+
+                generate_and_print_sample(
+                    model=model,
+                    tokenizer=tokenizer,
+                    device=device,
+                    start_context=start_context,
+                    max_new_tokens=50,
+                    context_size=model.config["context_length"],
+                )
+
+            if ckpt_freq is not None and global_step % ckpt_freq == 0:
+                checkpoint_dir = Path("checkpoints")
+                checkpoint_dir.mkdir(exist_ok=True)
+
+                checkpoint_path = checkpoint_dir / f"ckpt_step_{global_step}.pt"
+
+                save_checkpoint(
+                    model=model,
+                    optimizer=optimizer,
+                    epoch=epoch,
+                    global_step=global_step,
+                    path=str(checkpoint_path),
+                )
+
+                print(f"checkpoint saved: {checkpoint_path}")
+
+    return train_losses
+
     raise NotImplementedError("train_model을 구현하세요.")
 
 
